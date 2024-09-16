@@ -1,7 +1,7 @@
 import json
 import glob
 import re
-import imageio
+import imageio.v3 as iio
 import numpy as np
 from pycocotools import mask as mask_tools
 from tqdm import tqdm
@@ -29,6 +29,7 @@ def scan(*, suffix, splits, with_annotations):
     files = []
     for arena in arenas:
         files.extend(glob.glob(f'basketball-instants-dataset/{arena}/*/*_{suffix}.png'))
+        print(f'Found files for arena {arena}: {files}')
     images = set([re.sub(rf"_{suffix}\.png", "", file) for file in files])
     images = sorted(images)
 
@@ -38,7 +39,7 @@ def scan(*, suffix, splits, with_annotations):
 
     an_id = -1
     for i, image in enumerate(tqdm(images)):
-        img = imageio.imread(image+'_0.png')
+        img = iio.imread(image+'_0.png')
         img_id = len(root['images'])
         root['images'].append(dict(
             file_name='/'.join(image.split('/')[1:])+'_0.png',
@@ -47,7 +48,7 @@ def scan(*, suffix, splits, with_annotations):
             id=img_id,
         ))
         if with_annotations:
-            panoptic = imageio.imread(image+'_humans.png')
+            panoptic = iio.imread(image+'_0.png')
             for pan_id in np.unique(panoptic):
                 if pan_id < 1000 or pan_id >= 2000:
                     continue
@@ -77,6 +78,8 @@ def dump_split(name, splits, *, root):
     ret['categories'] = root['categories']
     ret['images'] = [image for image in root['images']
                      if image['file_name'].split('/')[0] in arenas]
+    # 取得された画像の数を出力
+    print(f'{name}: {len(ret["images"])} images found for arenas {arenas}')
     if name == 'train':
         del ret['images'][4::7]
     elif name == 'val':
@@ -86,12 +89,13 @@ def dump_split(name, splits, *, root):
 
     ret['annotations'] = [annot for annot in root['annotations']
                           if annot['image_id'] in kept_im_ids]
-    print(name, len(ret['images']), 'images', len(ret['annotations']), 'annotations')
+    # 分割後の結果を出力
+    print(f'{name}: {len(ret["images"])} images, {len(ret["annotations"])} annotations after filtering')
     json.dump(ret, open(f'annotations/{name}.json', 'w'))
 
 
 if __name__ == '__main__':
-    root = scan(suffix='humans', splits='ABCDE', with_annotations=True)
+    root = scan(suffix='0', splits='ABCDE', with_annotations=True)
     dump_split('train', 'BCDE', root=root)
     dump_split('val', 'BCDE', root=root)
     dump_split('trainval', 'BCDE', root=root)

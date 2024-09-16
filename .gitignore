@@ -1,4 +1,6 @@
 .ipynb_checkpoints
 *.pyc
+*.pt
+*.torch
 basketball-instants-dataset.zip
 work_dirs
