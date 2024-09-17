@@ -30,7 +30,8 @@ from transformers import SamModel, SamConfig, SamProcessor
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_image')
-    parser.add_argument('--num_train_step', default='best')
+    parser.add_argument('--batch_size', type = int)
+    parser.add_argument('--num_epoch', type = int)
     return parser.parse_args()
 
 def get_points(mask, num_points):  # Sample points inside the input mask
@@ -158,9 +159,7 @@ class SAMDataset(Dataset):
         inputs["ground_truth_mask"] = mask
         return inputs
 
-def train(num_image):
-
-    batch_size = 2
+def train(num_image, batch_size, num_epoch):
 
     # 対象のディレクトリを指定
     mask_dir = 'basketball-instants-dataset\\train_mask'
@@ -178,7 +177,7 @@ def train(num_image):
         image = cv2.imread(image_file_path)  # 画像をグレースケールで読み込む例
         mask = cv2.imread(mask_file_path, cv2.IMREAD_GRAYSCALE)
         save_shape = (1024, 1024)
-        save_shape = (1024, 1024)
+        save_shape = (256, 256)
         image = cv2.resize(image, save_shape)
         image = np.transpose(image, (2, 0, 1))
         mask = cv2.resize(mask, save_shape)
@@ -207,7 +206,7 @@ def train(num_image):
         print(k,v.shape)'''
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     # 直接バッチを取得（イテレータにしない）
-    '''for batch in train_dataloader:
+    for batch in train_dataloader:
         # バッチ内の各要素の形状を確認
         for k, v in batch.items():
             print(k, v.shape)
@@ -223,11 +222,11 @@ def train(num_image):
         if name.startswith("vision_encoder"):
             param.requires_grad_(False)
 
-    predictor = SAM2ImagePredictor(sam2_model)
+    # predictor = SAM2ImagePredictor(sam2_model)
     # Train mask decoder.
-    predictor.model.sam_mask_decoder.train(True)
+    # predictor.model.sam_mask_decoder.train(True)
     # Train prompt encoder.
-    predictor.model.sam_prompt_encoder.train(True)
+    # predictor.model.sam_prompt_encoder.train(True)
     # Initialize the optimizer and the loss function
     optimizer = Adam(sam2_model.mask_decoder.parameters(), lr=1e-5, weight_decay=0)
     # optimizer=torch.optim.AdamW(params=predictor.model.parameters(),lr=0.0001,weight_decay=1e-4) #1e-5, weight_decay = 4e-5
@@ -238,7 +237,6 @@ def train(num_image):
     #Try DiceFocalLoss, FocalLoss, DiceCELoss
     # seg_loss = dice_loss()
     #Training loop
-    num_epochs = 1000
     device = "cuda" if torch.cuda.is_available() else "cpu"
     sam2_model.to(device)
     sam2_model.train()
@@ -247,13 +245,15 @@ def train(num_image):
     FINE_TUNED_MODEL_NAME = "fine_tuned_sam2"
 
     print('--start training--')
-    for epoch in range(num_epochs):
+    best_loss = float('inf')
+    best_epoch = 0
+    all_epoch_losses = []
+    for epoch in range(num_epoch):
         epoch_losses = []
         for batch_ind, batch_data in enumerate(train_dataloader):
-            print('batch:', len(batch_data))
             # forward pass
             outputs = sam2_model(pixel_values=batch_data["pixel_values"].to(device),
-                            input_prompts=batch_data["input_prompts"].to(device),
+                            input_prompts=batch_data["input_points"].to(device),
                             multimask_output=False)
 
             # compute loss
@@ -269,8 +269,27 @@ def train(num_image):
             optimizer.step()
             epoch_losses.append(loss.item())
 
-        print(f'EPOCH: {epoch}')
-        print(f'Mean loss: {mean(epoch_losses)}')
+            if loss.item() < best_loss:
+                best_loss = loss.item()
+                best_epoch = epoch
+                # 最良のIoUを持つモデルを保存
+                FINE_TUNED_MODEL = FINE_TUNED_MODEL_NAME + "_best.torch"
+                save_path = "fine_tuned_model//" + str(num_image) + "//" + FINE_TUNED_MODEL
+                torch.save(sam2_model.state_dict(), save_path)
+                print(f"New best model saved at step {best_epoch} with IoU {best_loss}")
+
+        mean_epoch_loss = sum(epoch_losses) / len(epoch_losses)
+        all_epoch_losses.append(mean_epoch_loss)
+        print(f'EPOCH: {epoch}, Mean loss: {mean_epoch_loss:.6f}')
+
+    # Plot and save the loss graph
+    plt.figure()
+    plt.plot(range(num_epoch), all_epoch_losses, label='Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Over Epochs')
+    plt.legend()
+    plt.savefig('visualize_traininig//' + num_image + '//training_loss_plot.png')
 
 
     '''best_iou = 0
@@ -371,6 +390,8 @@ def train(num_image):
 '''
 if __name__ == '__main__':
     args = parse_arguments()
+    batch_size = args.batch_size
+    num_epoch = args.num_epoch
     num_images = [int(num_image) for num_image in args.num_image.split(",")]
     for num_image in num_images:
-        train(num_image)
+        train(num_image, batch_size, num_epoch)

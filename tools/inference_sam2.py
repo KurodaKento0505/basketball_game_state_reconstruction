@@ -5,6 +5,7 @@ import os
 import pandas as pd
 import torch
 import torch.nn.utils
+import argparse
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from PIL import Image
@@ -19,7 +20,12 @@ from sklearn.metrics import jaccard_score
 
 from evaluate_sam2 import show_prompt
 from fine_tuning_sam2 import read_batch
-from fine_tuning_sam2 import parse_arguments
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--num_image')
+    parser.add_argument('--num_train_step', default='best')
+    return parser.parse_args()
 
 def read_image(image_path, mask_path):  # read and resize image and mask
     # Get full paths
