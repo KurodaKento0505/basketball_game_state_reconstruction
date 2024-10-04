@@ -97,7 +97,7 @@ def process_frames():
     frames_generator = sv.get_video_frames_generator(SOURCE_VIDEO_PATH)
     sink = sv.ImageSink(
         target_dir_path=VIDEO_FRAMES_DIRECTORY_PATH,
-        image_name_pattern="{:05d}.jpeg")
+        image_name_pattern="{:05d}.jpg")
     
     with sink:
         for frame in frames_generator:
@@ -130,7 +130,7 @@ def process_frames():
     video_info = sv.VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
     frames_paths = sorted(sv.list_files_with_extensions(
         directory=VIDEO_FRAMES_DIRECTORY_PATH, 
-        extensions=["jpeg"]))
+        extensions=["jpg"]))
 
     with sv.VideoSink(TARGET_VIDEO_PATH, video_info=video_info) as sink:
         for frame_idx, object_ids, mask_logits in sam2_model.propagate_in_video(inference_state):
