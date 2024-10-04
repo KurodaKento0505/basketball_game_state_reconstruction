@@ -3,6 +3,7 @@ import cv2
 import torch
 import argparse
 from ultralytics import YOLO
+import supervision as sv
 # from segment_anything import sam_model_registry, SamPredictor
 from sam2.build_sam import build_sam2_video_predictor
 from sam2.build_sam import build_sam2
@@ -10,44 +11,51 @@ from sam2.sam2_video_predictor import SAM2VideoPredictor
 import numpy as np
 from pathlib import Path
 
+# 使用するデバイスをcuda:1に設定
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--num_image')
-    parser.add_argument('--num_time')
+    # parser.add_argument('--num_image')
+    # parser.add_argument('--num_time')
     return parser.parse_args()
 
 def initialize_sam2_model(sam2_checkpoint, model_cfg):
     # Load the SAM2 model
-    predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device="cuda")
-    if num_image > 0:
-        fine_tuned_weights = f"fine_tuned_model/1000/fine_tuned_sam2_best_step.torch"
-        predictor.load_state_dict(torch.load(fine_tuned_weights))
-    return predictor
+    sam2_model = build_sam2_video_predictor(model_cfg, sam2_checkpoint, device="cuda")
+    # if num_image > 0:
+    fine_tuned_weights = f"player_segmentation/fine_tuned_sam2/1000/fine_tuned_sam2_best_step.torch"
+    sam2_model.load_state_dict(torch.load(fine_tuned_weights, map_location=torch.device('cuda:1')))
+    sam2_model.to(device)
+    sam2_model.eval()
+    return sam2_model
 
 def run_yolo_on_frame(model, frame):
     """YOLOでフレーム上の選手を検出し、バウンディングボックスを取得"""
     results = model(frame)
     boxes = results[0].boxes.xyxy.cpu().numpy()  # 選手の検出ボックス
-    return boxes
+    confidences = results[0].boxes.conf.cpu().numpy()  # confidenceの取得
+    return boxes, confidences
 
-def run_sam_on_frame(predictor, frame, boxes):
-    """SAM2でフレームのセグメンテーションを実行し、バウンディングボックスをプロンプトとして与える"""
-    input_boxes = np.array(boxes)  # YOLOの出力を使用
-    predictor.set_image(frame)
-    masks, _, _ = predictor.predict(box=input_boxes, multimask_output=False)  # SAM2でマスクを取得
-    return masks
-
-def draw_boxes_on_frame(frame, boxes):
-    """フレームにバウンディングボックスを描画する関数"""
-    for box in boxes:
+def draw_boxes_on_frame(frame, boxes, confidences):
+    """フレームにバウンディングボックスと信頼度を描画する関数"""
+    for i, box in enumerate(boxes):
         x_min, y_min, x_max, y_max = map(int, box[:4])  # 座標を整数に変換
+        confidence = confidences[i]  # 信頼度を取得
         color = (0, 255, 0)  # バウンディングボックスの色（緑）
         thickness = 2  # 線の太さ
         # バウンディングボックスを描画
         cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), color, thickness)
+        # 信頼度を描画（小数点以下2桁にフォーマット）
+        label = f'{confidence:.2f}'
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5  # フォントの大きさ
+        font_thickness = 1  # フォントの太さ
+        text_color = (255, 0, 0)  # テキストの色（青）
+        # テキストを描画（バウンディングボックスの左上に）
+        cv2.putText(frame, label, (x_min, y_min - 5), font, font_scale, text_color, font_thickness)
     return frame
-
 
 def apply_masks_to_image(image, masks):
     # マスクを適用するためにカラー化
@@ -66,87 +74,90 @@ def apply_masks_to_image(image, masks):
     blended_image = cv2.addWeighted(image, 1, combined_mask, alpha, 0)
     return blended_image
 
-def process_frames(frame_dir, output_dir):
+def process_frames():
     """
     指定されたディレクトリ内のフレームを処理し、20フレームおきにYOLOを使用してプロンプトを取得し、
     それ以外のフレームではSAM2にプロンプトを与えずに物体追跡を行います。
     """
+
+    SOURCE_VIDEO_PATH = 'basketball-video-dataset/video/1.mp4'
+    VIDEO_FRAMES_DIRECTORY_PATH = 'basketball-video-dataset/frame/1'
+    TARGET_VIDEO_PATH = 'player_tracking/predict_video/predict_1.mp4'
+    PROCESSED_FRAMES_PATH = 'player_tracking/predict_frame/1'  # 処理後フレームの保存ディレクトリ
+
     # YOLOモデルのロード
     yolo_model = YOLO('/root/basketball/player_detection/fine_tuning/223/223_1/weights/best.pt')
+    yolo_model.to(device)
 
     # SAM2モデルのロード
     sam2_checkpoint = "sam2_hiera_base_plus.pt"  # 適切なチェックポイントを指定
     model_cfg = "sam2_hiera_b+.yaml"  # 適切な設定ファイルを指定
-    predictor = initialize_sam2_model(sam2_checkpoint, model_cfg)
+    sam2_model = initialize_sam2_model(sam2_checkpoint, model_cfg)
 
-    inference_state = predictor.init_state(video_path=frame_dir)
-    predictor.reset_state(inference_state)
+    frames_generator = sv.get_video_frames_generator(SOURCE_VIDEO_PATH)
+    sink = sv.ImageSink(
+        target_dir_path=VIDEO_FRAMES_DIRECTORY_PATH,
+        image_name_pattern="{:05d}.jpeg")
+    
+    with sink:
+        for frame in frames_generator:
+            sink.save_image(frame)
 
-    ann_frame_idx = 0  # 初期フレーム
-    ann_obj_id = 1  # オブジェクトID
+    inference_state = sam2_model.init_state(VIDEO_FRAMES_DIRECTORY_PATH)
+    sam2_model.reset_state(inference_state)
+
+    colors = ['#FF1493', '#00BFFF', '#FF6347', '#FFD700']
+    mask_annotator = sv.MaskAnnotator(
+        color=sv.ColorPalette.from_hex(colors),
+        color_lookup=sv.ColorLookup.TRACK)
 
     # 最初のプロンプト
-    first_frame = frame_dir + '/00001.jpg'
-    boxes = run_sam_on_frame(yolo_model, first_frame)
-    _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-        inference_state=inference_state,
-        frame_idx=ann_frame_idx,
-        obj_id=ann_obj_id,
-        boxes=boxes,
-    )
-    # 結果のプロパゲート（伝播）を実行
-    video_segments = {}
-    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
-        video_segments[out_frame_idx] = {
-            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
-            for i, out_obj_id in enumerate(out_obj_ids)
-        }
+    ann_frame_idx = 0  # 初期フレーム
+    ann_obj_id = 1  # オブジェクトID
+    first_frame = cv2.imread(os.path.join(VIDEO_FRAMES_DIRECTORY_PATH, f"{ann_frame_idx:05d}.jpg"))
+    boxes, confidences = run_yolo_on_frame(yolo_model, first_frame) # .to(device)
+    yolo_first_frame = draw_boxes_on_frame(first_frame, boxes, confidences)
+    cv2.imwrite('player_detection/predict_frame/1/00000.jpg', yolo_first_frame)
+    for box in boxes:
+        _, out_obj_ids, out_mask_logits = sam2_model.add_new_points_or_box(
+            inference_state=inference_state,
+            frame_idx=ann_frame_idx,
+            obj_id=ann_obj_id,
+            box=box,
+        )
+        ann_obj_id += 1
 
-    # フレームが格納されているディレクトリのパスを取得
-    frames_path = Path(frame_dir)
-    frames = sorted(frames_path.glob('*.jpg'))  # JPEG形式のフレームを取得（必要に応じて拡張子を変更）
+    video_info = sv.VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
+    frames_paths = sorted(sv.list_files_with_extensions(
+        directory=VIDEO_FRAMES_DIRECTORY_PATH, 
+        extensions=["jpeg"]))
 
-    total_frames = len(frames)
-    print(f"Total frames: {total_frames}")
-
-    # 出力ディレクトリの設定
-    output_dir = os.path.join(frame_dir, 'segmented_output')
-    os.makedirs(output_dir, exist_ok=True)
-
-    boxes = []  # 初期化しておく
-    for current_frame, frame_path in enumerate(frames):
-        frame = cv2.imread(str(frame_path))  # フレームを読み込む
-        if frame is None:
-            print(f"Failed to read frame: {frame_path}")
-            continue
-
-        # 20フレームごとにYOLOでバウンディングボックスを取得
-        if current_frame % 20 == 0:
-            boxes = run_yolo_on_frame(yolo_model, frame)
-            print(f"Frame {current_frame}: Detected {len(boxes)} players.")
-
-        # SAM2でセグメンテーションを行う
-        masks = run_sam_on_frame(sam2_predictor, frame, boxes if current_frame % 20 == 0 else None)
-        print(f"Frame {current_frame}: SAM2 completed segmentation.")
-
-        # セグメンテーションマスクを元画像に反映
-        segmented_image = apply_masks_to_image(frame, masks)
-
-        # 結果を保存
-        output_image_path = os.path.join(output_dir, frame_path.name)
-        cv2.imwrite(output_image_path, segmented_image)
-        print(f"Saved segmented image: {output_image_path}")
-
-    print("Processing completed.")
-
+    with sv.VideoSink(TARGET_VIDEO_PATH, video_info=video_info) as sink:
+        for frame_idx, object_ids, mask_logits in sam2_model.propagate_in_video(inference_state):
+            frame = cv2.imread(frames_paths[frame_idx])
+            # frame_tensor = torch.from_numpy(frame).to(device)
+            masks = (mask_logits > 0.0).cpu().numpy()
+            N, X, H, W = masks.shape
+            masks = masks.reshape(N * X, H, W)
+            detections = sv.Detections(
+                xyxy=sv.mask_to_xyxy(masks=masks),
+                mask=masks,
+                tracker_id=np.array(object_ids)
+            )
+            frame = mask_annotator.annotate(frame, detections)
+            # フレームを個別に保存
+            processed_frame_path = os.path.join(PROCESSED_FRAMES_PATH, f"{frame_idx:05d}.jpg")
+            cv2.imwrite(processed_frame_path, frame)
+            # フレームを動画としても保存
+            # sink.write_frame(frame)
 
 if __name__ == '__main__':
     args = parse_arguments()
-    num_images = [int(num_image) for num_image in args.num_image.split(",")]
+    # num_images = [int(num_image) for num_image in args.num_image.split(",")]
     video_frame_dir = "/root/basketball/basketball-video-dataset/frame/1"  # 動画ファイルのパスを指定
     output_dir = "player_tracking/predict_frame"
-    for num_image in num_images:
-        segmentation_results = process_frames(video_frame_dir, output_dir, num_image)
+    # for num_image in num_images:
+    segmentation_results = process_frames()
 
     # 結果の処理（保存や表示）
     print("Segmentation completed for all frames.")
