@@ -1,4 +1,5 @@
 import os
+import gc
 import cv2
 import torch
 import argparse
@@ -17,6 +18,7 @@ device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--num_video')
     # parser.add_argument('--num_image')
     # parser.add_argument('--num_time')
     return parser.parse_args()
@@ -74,16 +76,17 @@ def apply_masks_to_image(image, masks):
     blended_image = cv2.addWeighted(image, 1, combined_mask, alpha, 0)
     return blended_image
 
-def process_frames():
+def process_frames(num_video):
     """
     指定されたディレクトリ内のフレームを処理し、20フレームおきにYOLOを使用してプロンプトを取得し、
     それ以外のフレームではSAM2にプロンプトを与えずに物体追跡を行います。
     """
 
-    SOURCE_VIDEO_PATH = 'basketball-video-dataset/video/1.mp4'
-    VIDEO_FRAMES_DIRECTORY_PATH = 'basketball-video-dataset/frame/1'
-    TARGET_VIDEO_PATH = 'player_tracking/predict_video/predict_1.mp4'
-    PROCESSED_FRAMES_PATH = 'player_tracking/predict_frame/1'  # 処理後フレームの保存ディレクトリ
+    SOURCE_VIDEO_PATH = f'basketball-video-dataset/video/{num_video}.mp4'
+    VIDEO_FRAMES_DIRECTORY_PATH = f'basketball-video-dataset/frame/{num_video}'
+    TARGET_VIDEO_PATH = f'player_tracking/predict_video/predict_{num_video}.mp4'
+    PROCESSED_FRAMES_PATH = f'player_tracking/predict_frame_sam2/{num_video}'  # 処理後フレームの保存ディレクトリ
+    PROCESSED_YOLO_FRAMES_PATH = f'player_detection/predict_frame/{num_video}'
 
     # YOLOモデルのロード
     yolo_model = YOLO('/root/basketball/player_detection/fine_tuning/223/223_1/weights/best.pt')
@@ -114,18 +117,24 @@ def process_frames():
     # 最初のプロンプト
     ann_frame_idx = 0  # 初期フレーム
     ann_obj_id = 1  # オブジェクトID
-    first_frame = cv2.imread(os.path.join(VIDEO_FRAMES_DIRECTORY_PATH, f"{ann_frame_idx:05d}.jpg"))
-    boxes, confidences = run_yolo_on_frame(yolo_model, first_frame) # .to(device)
-    yolo_first_frame = draw_boxes_on_frame(first_frame, boxes, confidences)
-    cv2.imwrite('player_detection/predict_frame/1/00000.jpg', yolo_first_frame)
-    for box in boxes:
-        _, out_obj_ids, out_mask_logits = sam2_model.add_new_points_or_box(
-            inference_state=inference_state,
-            frame_idx=ann_frame_idx,
-            obj_id=ann_obj_id,
-            box=box,
-        )
-        ann_obj_id += 1
+    while ann_frame_idx < 508:
+        first_frame = cv2.imread(os.path.join(VIDEO_FRAMES_DIRECTORY_PATH, f"{ann_frame_idx:05d}.jpg"))
+        boxes, confidences = run_yolo_on_frame(yolo_model, first_frame) # .to(device)
+        yolo_first_frame = draw_boxes_on_frame(first_frame, boxes, confidences)
+        cv2.imwrite(os.path.join(PROCESSED_YOLO_FRAMES_PATH, f"{ann_frame_idx:05d}.jpg"), yolo_first_frame)
+        for box in boxes:
+            _, out_obj_ids, out_mask_logits = sam2_model.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=ann_frame_idx,
+                obj_id=ann_obj_id,
+                box=box,
+            )
+            ann_obj_id += 1
+        # 不要な変数を削除
+        del first_frame, boxes, confidences, yolo_first_frame, out_obj_ids, out_mask_logits
+        gc.collect()
+        torch.cuda.empty_cache()
+        ann_frame_idx += 10
 
     video_info = sv.VideoInfo.from_video_path(SOURCE_VIDEO_PATH)
     frames_paths = sorted(sv.list_files_with_extensions(
@@ -148,16 +157,16 @@ def process_frames():
             # フレームを個別に保存
             processed_frame_path = os.path.join(PROCESSED_FRAMES_PATH, f"{frame_idx:05d}.jpg")
             cv2.imwrite(processed_frame_path, frame)
+            # 不要な変数を削除
+            del frame, masks, detections
+            gc.collect()
+            torch.cuda.empty_cache()
             # フレームを動画としても保存
             # sink.write_frame(frame)
 
 if __name__ == '__main__':
     args = parse_arguments()
     # num_images = [int(num_image) for num_image in args.num_image.split(",")]
-    video_frame_dir = "/root/basketball/basketball-video-dataset/frame/1"  # 動画ファイルのパスを指定
-    output_dir = "player_tracking/predict_frame"
+    num_video = args.num_video
     # for num_image in num_images:
-    segmentation_results = process_frames()
-
-    # 結果の処理（保存や表示）
-    print("Segmentation completed for all frames.")
+    segmentation_results = process_frames(num_video)
