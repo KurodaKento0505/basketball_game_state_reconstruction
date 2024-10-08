@@ -55,7 +55,7 @@ def process_frames():
 
     SOURCE_VIDEO_PATH = 'basketball-video-dataset/video/1.mp4'
     VIDEO_FRAMES_DIRECTORY_PATH = 'basketball-video-dataset/frame/1'
-    TARGET_VIDEO_PATH = 'player_tracking/predict_video/predict_1.mp4'
+    TARGET_VIDEO_PATH = 'player_tracking/predict_video/det_player_1.mp4'
     PROCESSED_FRAMES_PATH = 'player_tracking/predict_frame_yolo/1'  # 処理後フレームの保存ディレクトリ
 
     # YOLOモデルのロード
