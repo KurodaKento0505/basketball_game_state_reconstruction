@@ -194,7 +194,7 @@ def process_frames(num_video, make_mask, num_prompt):
 
         # SAM2モデルのロード
         sam2_checkpoint = "sam2_hiera_base_plus.pt"  # 適切なチェックポイントを指定
-        model_cfg = "sam2_hiera_b+.yaml"  # 適切な設定ファイルを指定
+        model_cfg = "player_tracking/sam2/sam2_hiera_b+.yaml"  # 適切な設定ファイルを指定
         sam2_model = initialize_sam2_model(sam2_checkpoint, model_cfg)
 
         inference_state = sam2_model.init_state(INPUT_VIDEO_FRAMES_DIR_PATH)
