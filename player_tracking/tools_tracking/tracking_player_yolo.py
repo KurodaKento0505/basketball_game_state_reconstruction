@@ -1,5 +1,6 @@
 import os
 import cv2
+import json
 import torch
 import argparse
 from ultralytics import YOLO
@@ -17,7 +18,7 @@ device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    # parser.add_argument('--num_image')
+    parser.add_argument('--num_video')
     # parser.add_argument('--num_time')
     return parser.parse_args()
 
@@ -47,59 +48,69 @@ def draw_boxes_on_frame(frame, boxes, confidences):
         cv2.putText(frame, label, (x_min, y_min - 5), font, font_scale, text_color, font_thickness)
     return frame
 
-def process_frames():
+def process_frames(num_video):
     """
-    指定されたディレクトリ内のフレームを処理し、20フレームおきにYOLOを使用してプロンプトを取得し、
-    それ以外のフレームではSAM2にプロンプトを与えずに物体追跡を行います。
+    動画の各フレームを処理し、YOLOの検出結果をJSONファイルにまとめて保存します。
     """
 
-    SOURCE_VIDEO_PATH = 'basketball-video-dataset/video/1.mp4'
-    VIDEO_FRAMES_DIRECTORY_PATH = 'basketball-video-dataset/frame/1'
-    TARGET_VIDEO_PATH = 'player_tracking/predict_video/det_player_1.mp4'
-    PROCESSED_FRAMES_PATH = 'player_tracking/predict_frame_yolo/1'  # 処理後フレームの保存ディレクトリ
+    SOURCE_VIDEO_PATH = f'basketball-video-dataset/video/{num_video}.mp4'
+    DETECTION_RESULTS_PATH = f'player_tracking/predict_frame_yolo/{num_video}.json'  # 検出結果の保存パス
 
     # YOLOモデルのロード
-    yolo_model = YOLO('/root/basketball/player_detection/fine_tuning/223/223_1/weights/best.pt') # 
+    yolo_model = YOLO('/root/basketball/player_detection/fine_tuning/223/223_1/weights/best.pt')
     yolo_model.to(device)
-
     # Open the video file
     cap = cv2.VideoCapture(SOURCE_VIDEO_PATH)
-
-    # Loop through the video frames
     frame_count = 0
+    # 全フレームの検出結果を格納するリスト
+    all_detections = []
+
     while cap.isOpened():
-        # Read a frame from the video
         success, frame = cap.read()
-
         if success:
-            # Run YOLO11 tracking on the frame, persisting tracks between frames
-            results = yolo_model.track(frame, conf=0.7, persist=True) # iou=0.8, 
-
-            # Visualize the results on the frame
-            annotated_frame = results[0].plot()
-
-            # Display the annotated frame
-            cv2.imwrite(os.path.join(PROCESSED_FRAMES_PATH, f"{frame_count:05d}.jpg"), annotated_frame)
-
-            '''# Break the loop if 'q' is pressed
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break'''
+            # YOLOを実行して結果を取得
+            results = yolo_model.track(frame, persist=True)  # iou=0.8, conf=0.7, persist=True
+            # 検出結果を取得
+            boxes = results[0].boxes.xyxy.cpu().numpy()  # 検出ボックス
+            confidences = results[0].boxes.conf.cpu().numpy()  # confidenceの取得
+            yolo_ids = results[0].boxes.id.int().cpu().numpy()  # IDの取得
+            # フレームごとの検出結果をリストに追加
+            frame_detections = {
+                "frame": frame_count,
+                "detections": []
+            }
+            for box, conf, yolo_id in zip(boxes, confidences, yolo_ids):
+                detection = {
+                    "box": {
+                        "x_min": float(box[0]),
+                        "y_min": float(box[1]),
+                        "x_max": float(box[2]),
+                        "y_max": float(box[3])
+                    },
+                    "confidence": float(conf),
+                    "id": int(yolo_id)
+                }
+                frame_detections["detections"].append(detection)
+            all_detections.append(frame_detections)
         else:
-            # Break the loop if the end of the video is reached
+            # 動画の終わりに到達した場合
             break
         frame_count += 1
 
-    # Release the video capture object and close the display window
+    # 動画全体の検出結果をJSONファイルに保存
+    with open(DETECTION_RESULTS_PATH, 'w') as json_file:
+        json.dump(all_detections, json_file, indent=4)
+
+    # 終了処理
     cap.release()
     # cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     args = parse_arguments()
     # num_images = [int(num_image) for num_image in args.num_image.split(",")]
-    video_frame_dir = "/root/basketball/basketball-video-dataset/frame/1"  # 動画ファイルのパスを指定
-    output_dir = "player_tracking/predict_frame"
+    num_video = args.num_video
     # for num_image in num_images:
-    segmentation_results = process_frames()
+    segmentation_results = process_frames(num_video)
 
     # 結果の処理（保存や表示）
     print("Segmentation completed for all frames.")
