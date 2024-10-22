@@ -162,7 +162,6 @@ def process_frames(num_video, make_mask, num_prompt):
         start_frame = 250
         end_frame = 450
         trim_video(ORIGINAL_VIDEO_PATH, INPUT_VIDEO_PATH, start_frame, end_frame)
-    print('input video path:', INPUT_VIDEO_PATH)
 
     # フレーム作成
     frames_generator = sv.get_video_frames_generator(INPUT_VIDEO_PATH)
@@ -190,11 +189,10 @@ def process_frames(num_video, make_mask, num_prompt):
         yolo_model = YOLO('/root/basketball/player_detection/fine_tuning/223/223_1/weights/best.pt')
         yolo_model.to(device)
         yolo_results = yolo_results_from_json(MODIFIED_RESULTS_PATH)
-        print(yolo_results)
 
         # SAM2モデルのロード
         sam2_checkpoint = "sam2_hiera_base_plus.pt"  # 適切なチェックポイントを指定
-        model_cfg = "player_tracking/sam2/sam2_hiera_b+.yaml"  # 適切な設定ファイルを指定
+        model_cfg = "sam2_hiera_b+.yaml"  # 適切な設定ファイルを指定
         sam2_model = initialize_sam2_model(sam2_checkpoint, model_cfg)
 
         inference_state = sam2_model.init_state(INPUT_VIDEO_FRAMES_DIR_PATH)
@@ -223,7 +221,7 @@ def process_frames(num_video, make_mask, num_prompt):
             # for box, yolo_id in zip(boxes, yolo_ids):
                 
             # 不要な変数を削除
-            del prompt_frame, boxes, confidences, yolo_ids, yolo_prompt_frame, out_obj_ids, out_mask_logits
+            del prompt_frame, out_obj_ids, out_mask_logits
             gc.collect()
             torch.cuda.empty_cache()
             prompt_frame_idx += num_prompt

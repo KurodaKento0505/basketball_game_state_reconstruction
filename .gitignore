@@ -9,6 +9,12 @@
 *.jpeg
 *.txt
 *.json
+*.yaml
+*.ssh
+*.ssh.pug
+*.out
+*.csv
+*.cache
 basketball-instants-dataset.zip
 work_dirs
 
