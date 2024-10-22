@@ -1,7 +1,0 @@
-# yamlファイルから各画像フォルダまでの相対パス(相対パスで上手くいかない時は絶対パスにする)
-train: ./train/images/
-val: ./valid/images/
-
-# データセットが含むクラス
-nc: 1 # クラス数
-names: ['basketball-player'] # クラス名の配列。複数クラスならば`classes.txt`に書かれている順番にする
