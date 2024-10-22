@@ -62,19 +62,19 @@ basketball/
 ```
 
 ## player segmentation
-### YOLOv10のファインチューニング
+#### YOLOv10のファインチューニング
 fine_tuning_yolo.py を実行．引数は（ごめんなさい．このファイルだけないです．git commitをいじってたら消えました．．）
 inference_yolo.py を実行．引数は num_image（画像枚数）, num_time（何回目の学習）
 
 ## player detection
-### SAM2のファインチューニング
+#### SAM2のファインチューニング
 fine_tuning_sam2.py を実行．引数は num_image（画像枚数）, num_epoch（エポック数）
 inference_sam2.py を実行．引数は num_image（画像枚数）, --num_train_step（default=best），num_time（何回目の学習）
 
 ## player tracking
-### ファインチューニング済みのYOLOv10を用いて，最初のフレームからbboxを獲得
-### ファインチューニング済みのSAM2に最初のフレームのbboxをプロンプトとして付与
-### SAM2を用いてセグメンテーション
+#### ファインチューニング済みのYOLOv10を用いて，最初のフレームからbboxを獲得
+#### ファインチューニング済みのSAM2に最初のフレームのbboxをプロンプトとして付与
+#### SAM2を用いてセグメンテーション
 tracking_player_sam2.py を実行．引数は num_video（動画番号）, make_mask(store_true), num_prompt（何フレームおきにプロンプト与えるか）
 
 ### ファインチューニング済みのYOLOv10でトラッキング
